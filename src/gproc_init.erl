@@ -41,7 +41,7 @@ hard_reset() ->
     %% kill via supervisor
     ok = supervisor:terminate_child(gproc_sup, gproc),
     %% delete ets table
-    _ = [ ets:delete(Tab) || Tab <- ets:all(), Tab =:= gproc ],
+    _ = [ shards:delete(Tab) || Tab <- shards:all(), Tab =:= gproc ],
     %% restart via supervisor
     {ok,_} = supervisor:restart_child(gproc_sup, gproc),
     ok.

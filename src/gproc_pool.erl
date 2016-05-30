@@ -354,7 +354,7 @@ pick_worker(Pool, N) ->
 
 pick(Pool, Sz, round_robin, Ret) ->
     Next = incr(Pool, 1, Sz),
-    case ets:next(gproc, {{n,l,[?MODULE,Pool,Next]},n}) of
+    case shards:next(gproc, {{n,l,[?MODULE,Pool,Next]},n}) of
         {{n,l,[?MODULE,Pool,Actual,_Name]} = Pick, _} ->
             case Actual - Next of
                 Diff when Diff > 1 ->
@@ -365,7 +365,7 @@ pick(Pool, Sz, round_robin, Ret) ->
                     ret(Pick, Ret)
             end;
         _ ->
-            case ets:next(gproc, {{n,l,[?MODULE,Pool,0]}, n}) of
+            case shards:next(gproc, {{n,l,[?MODULE,Pool,0]}, n}) of
                 {{n,l,[?MODULE,Pool,Actual1,_Name1]} = Pick, _} ->
                     incr(Pool, Sz-Next+Actual1, Sz),
                     %% gproc:update_counter(
@@ -384,12 +384,12 @@ pick(Pool, Sz, direct, N, Ret) when is_integer(N), N > 0 ->
     pick_near(Pool, case (N rem Sz-1) + 1  of 0 -> Sz; N1 -> N1 end, Ret).
 
 pick_near(Pool, N, Ret) ->
-    case ets:next(gproc, {{n,l,[?MODULE,Pool,N]}, n}) of
+    case shards:next(gproc, {{n,l,[?MODULE,Pool,N]}, n}) of
         {{n,l,[?MODULE,Pool,_,_]} = Pick, _} ->
             ret(Pick, Ret);
         _ ->
             %% wrap
-            case ets:next(gproc, {{n,l,[?MODULE,Pool,1]}, n}) of
+            case shards:next(gproc, {{n,l,[?MODULE,Pool,1]}, n}) of
                 {{n,l,[?MODULE,Pool,_,_]} = Pick, _} ->
                     ret(Pick, Ret);
                 _ ->
@@ -400,7 +400,7 @@ pick_near(Pool, N, Ret) ->
 ret(Name, name) ->
     Name;
 ret(Name, pid) ->
-    case ets:lookup(gproc, {Name,n}) of
+    case shards:lookup(gproc, {Name,n}) of
         [{_, Pid, _}] ->
             Pid;
         [] ->
@@ -463,8 +463,8 @@ claim_w(Pool, F, W) ->
 -define(CLAIM_CHUNK, 5).
 
 claim_(Pool, F) ->
-    %% Sorry, but we use ets:select/3 here in order to shave off a few us.
-    case ets:select(gproc, [{ {{{n,l,[?MODULE,Pool,'_','_']},n}, '$1', 0}, [],
+    %% Sorry, but we use shards:select/3 here in order to shave off a few us.
+    case shards:select(gproc, [{ {{{n,l,[?MODULE,Pool,'_','_']},n}, '$1', 0}, [],
 			      [{{ {element,1,{element,1,'$_'}}, '$1' }}]}],
 		     ?CLAIM_CHUNK) of
         {[_|_] = Workers, Cont} ->
@@ -481,7 +481,7 @@ claim_(Pool, F) ->
 claim_cont('$end_of_table', _) ->
     false;
 claim_cont(Cont, F) ->
-    case ets:select(Cont) of
+    case shards:select(Cont) of
         {[_|_] = Workers, Cont1} ->
             case try_claim(Workers, F) of
                 {true, _} = True ->

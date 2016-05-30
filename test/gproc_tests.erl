@@ -45,7 +45,7 @@ t_server_opts() ->
 
 t_ets_opts() ->
     %% Cannot inspect the write_concurrency attribute on an ets table in
-    %% any easy way, so trace on the ets:new/2 call and check the arguments.
+    %% any easy way, so trace on the shards:new/2 call and check the arguments.
     application:set_env(gproc, ets_options, [{write_concurrency, false}]),
     erlang:trace_pattern({ets,new, 2}, [{[gproc,'_'],[],[]}], [global]),
     erlang:trace(new, true, [call]),
@@ -410,8 +410,8 @@ spawn_regger(Name) ->
 t_is_clean() ->
     sys:get_status(gproc), % in order to synch
     sys:get_status(gproc_monitor),
-    T = ets:tab2list(gproc),
-    Tm = ets:tab2list(gproc_monitor),
+    T = shards:tab2list(gproc),
+    Tm = shards:tab2list(gproc_monitor),
     ?assertMatch([], Tm),
     ?assertMatch([], T -- [{{whereis(gproc_monitor), l}}]).
 
@@ -440,18 +440,18 @@ t_gproc_crash() ->
     give_gproc_some_time(100),
     ?assert(whereis(gproc) =/= undefined),
     %%
-    %% Check that the registration is still there using an ets:lookup(),
+    %% Check that the registration is still there using an shards:lookup(),
     %% Once we've killed the process, gproc will always return undefined
     %% if the process is not alive, regardless of whether the registration
     %% is still there. So, here, the lookup should find something...
     %%
-    ?assert(ets:lookup(gproc,{{n,l,P},n}) =/= []),
+    ?assert(shards:lookup(gproc,{{n,l,P},n}) =/= []),
     ?assert(gproc:where({n,l,P}) =:= P),
     exit(P, kill),
     %% ...and here, it shouldn't.
     %% (sleep for a while first to let gproc handle the EXIT
     give_gproc_some_time(10),
-    ?assert(ets:lookup(gproc,{{n,l,P},n}) =:= []).
+    ?assert(shards:lookup(gproc,{{n,l,P},n}) =:= []).
 
 t_cancel_wait_and_register() ->
     Alias = {n, l, foo},

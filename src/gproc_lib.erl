@@ -68,10 +68,10 @@ insert_reg(K, Value, Pid, Scope) ->
     insert_reg(K, Value, Pid, Scope, registered).
 
 insert_reg({T,_,Name} = K, Value, Pid, Scope, Event) when T==a; T==n; T==rc ->
-    Res = case ets:insert_new(?TAB, {{K,T}, Pid, Value}) of
+    Res = case shards:insert_new(?TAB, {{K,T}, Pid, Value}) of
               true ->
                   %% Use insert_new to avoid overwriting existing entry
-                  _ = ets:insert_new(?TAB, {{Pid,K}, []}),
+                  _ = shards:insert_new(?TAB, {{Pid,K}, []}),
                   true;
               false ->
                   maybe_waiters(K, Pid, Value, T, Event)
@@ -82,12 +82,12 @@ insert_reg({p,Scope,_} = K, Value, shared, Scope, _E)
   when Scope == g; Scope == l ->
     %% shared properties are unique
     Info = [{{K, shared}, shared, Value}, {{shared,K}, []}],
-    ets:insert_new(?TAB, Info);
+    shards:insert_new(?TAB, Info);
 insert_reg({c,Scope,Ctr} = Key, Value, Pid, Scope, _E) when Scope==l; Scope==g ->
     %% Non-unique keys; store Pid in the key part
     K = {Key, Pid},
     Kr = {Pid, Key},
-    Res = ets:insert_new(?TAB, [{K, Pid, Value}, {Kr, [{initial, Value}]}]),
+    Res = shards:insert_new(?TAB, [{K, Pid, Value}, {Kr, [{initial, Value}]}]),
     case Res of
         true ->
             update_aggr_counter(Scope, Ctr, Value);
@@ -98,7 +98,7 @@ insert_reg({c,Scope,Ctr} = Key, Value, Pid, Scope, _E) when Scope==l; Scope==g -
 insert_reg({r,Scope,R} = Key, Value, Pid, Scope, _E) when Scope==l; Scope==g ->
     K = {Key, Pid},
     Kr = {Pid, Key},
-    Res = ets:insert_new(?TAB, [{K, Pid, Value}, {Kr, [{initial, Value}]}]),
+    Res = shards:insert_new(?TAB, [{K, Pid, Value}, {Kr, [{initial, Value}]}]),
     case Res of
         true ->
             update_resource_count(Scope, R, 1);
@@ -110,34 +110,34 @@ insert_reg({_,_,_} = Key, Value, Pid, _Scope, _E) when is_pid(Pid) ->
     %% Non-unique keys; store Pid in the key part
     K = {Key, Pid},
     Kr = {Pid, Key},
-    ets:insert_new(?TAB, [{K, Pid, Value}, {Kr, []}]).
+    shards:insert_new(?TAB, [{K, Pid, Value}, {Kr, []}]).
 
 maybe_scan(a, Pid, Scope, Name, K) ->
     Initial = scan_existing_counters(Scope, Name),
-    ets:insert(?TAB, {{K,a}, Pid, Initial});
+    shards:insert(?TAB, {{K,a}, Pid, Initial});
 maybe_scan(rc, Pid, Scope, Name, K) ->
     Initial = scan_existing_resources(Scope, Name),
-    ets:insert(?TAB, {{K,rc}, Pid, Initial});
+    shards:insert(?TAB, {{K,rc}, Pid, Initial});
 maybe_scan(_, _, _, _, _) ->
     true.
 
 insert_attr({_,Scope,_} = Key, Attrs, Pid, Scope) when Scope==l;
 						       Scope==g ->
-    case ets:lookup(?TAB,  K = {Pid, Key}) of
+    case shards:lookup(?TAB,  K = {Pid, Key}) of
 	[{_, Attrs0}] when is_list(Attrs) ->
 	    As = proplists:get_value(attrs, Attrs0, []),
 	    As1 = lists:foldl(fun({K1,_} = Attr, Acc) ->
 				     lists:keystore(K1, 1, Acc, Attr)
 			     end, As, Attrs),
 	    Attrs1 = lists:keystore(attrs, 1, Attrs0, {attrs, As1}),
-	    ets:insert(?TAB, {K, Attrs1}),
+	    shards:insert(?TAB, {K, Attrs1}),
 	    Attrs1;
 	_ ->
 	    false
     end.
 
 get_attr(Attr, Pid, {_,_,_} = Key, Default) ->
-    case ets:lookup(?TAB, {Pid, Key}) of
+    case shards:lookup(?TAB, {Pid, Key}) of
         [{_, Opts}] when is_list(Opts) ->
             case lists:keyfind(attrs, 1, Opts) of
                 {_, Attrs} ->
@@ -159,14 +159,14 @@ get_attr(Attr, Pid, {_,_,_} = Key, Default) ->
 
 insert_many(T, Scope, KVL, Pid) ->
     Objs = mk_reg_objs(T, Scope, Pid, KVL),
-    case ets:insert_new(?TAB, Objs) of
+    case shards:insert_new(?TAB, Objs) of
         true ->
             RevObjs = mk_reg_rev_objs(T, Scope, Pid, KVL),
-            ets:insert(?TAB, RevObjs),
+            shards:insert(?TAB, RevObjs),
             _ = gproc_lib:ensure_monitor(Pid, Scope),
             {true, Objs};
         false ->
-            Existing = [{Obj, ets:lookup(?TAB, K)} || {K,_,_} = Obj <- Objs],
+            Existing = [{Obj, shards:lookup(?TAB, K)} || {K,_,_} = Obj <- Objs],
             case lists:any(fun({_, [{_, _, _}]}) ->
                                    true;
                               (_) ->
@@ -189,7 +189,7 @@ insert_many(T, Scope, KVL, Pid) ->
 insert_objects(Objs) ->
     lists:foreach(
       fun({{{Id,_} = _K, Pid, V} = Obj, Existing}) ->
-              ets:insert(?TAB, [Obj, {{Pid, Id}, []}]),
+              shards:insert(?TAB, [Obj, {{Pid, Id}, []}]),
               case Existing of
                   [] -> ok;
                   [{_, Waiters}] ->
@@ -200,7 +200,7 @@ insert_objects(Objs) ->
 
 await({T,C,_} = Key, WPid, {_Pid, Ref} = From) ->
     Rev = {{WPid,Key}, []},
-    case ets:lookup(?TAB, {Key,T}) of
+    case shards:lookup(?TAB, {Key,T}) of
         [{_, P, Value}] ->
             %% for symmetry, we always reply with Ref and then send a message
             if C == g ->
@@ -215,12 +215,12 @@ await({T,C,_} = Key, WPid, {_Pid, Ref} = From) ->
         [{K, Waiters}] ->
             NewWaiters = [{WPid,Ref} | Waiters],
             W = {K, NewWaiters},
-            ets:insert(?TAB, [W, Rev]),
+            shards:insert(?TAB, [W, Rev]),
             _ = gproc_lib:ensure_monitor(WPid,C),
             {reply, Ref, [W,Rev]};
         [] ->
             W = {{Key,T}, [{WPid,Ref}]},
-            ets:insert(?TAB, [W, Rev]),
+            shards:insert(?TAB, [W, Rev]),
             _ = gproc_lib:ensure_monitor(WPid,C),
             {reply, Ref, [W,Rev]}
     end.
@@ -228,10 +228,10 @@ await({T,C,_} = Key, WPid, {_Pid, Ref} = From) ->
 maybe_waiters(_, _, _, _, []) ->
     false;
 maybe_waiters(K, Pid, Value, T, Event) ->
-    case ets:lookup(?TAB, {K,T}) of
+    case shards:lookup(?TAB, {K,T}) of
         [{_, Waiters}] when is_list(Waiters) ->
             Followers = [F || {_,_,follow} = F <- Waiters],
-            ets:insert(?TAB, [{{K,T}, Pid, Value},
+            shards:insert(?TAB, [{{K,T}, Pid, Value},
                               {{Pid,K}, [{monitor, Followers}
                                          || Followers =/= []]}]),
             notify_waiters(Waiters, K, Pid, Value, Event),
@@ -255,18 +255,18 @@ remove_wait({T,_,_} = Key, Pid, Ref, Waiters) ->
     Rev = {Pid,Key},
     case remove_from_waiters(Waiters, Pid, Ref) of
 	[] ->
-	    ets:delete(?TAB, {Key,T}),
-	    ets:delete(?TAB, Rev),
+	    shards:delete(?TAB, {Key,T}),
+	    shards:delete(?TAB, Rev),
 	    [{delete, [{Key,T}, Rev], []}];
 	NewWaiters ->
-	    ets:insert(?TAB, {Key, NewWaiters}),
+	    shards:insert(?TAB, {Key, NewWaiters}),
 	    case lists:keymember(Pid, 1, NewWaiters) of
 		true ->
 		    %% should be extremely unlikely
 		    [{insert, [{Key, NewWaiters}]}];
 		false ->
 		    %% delete the reverse entry
-		    ets:delete(?TAB, Rev),
+		    shards:delete(?TAB, Rev),
 		    [{insert, [{Key, NewWaiters}]},
 		     {delete, [Rev], []}]
 	    end
@@ -284,7 +284,7 @@ is_waiter(_, _, _) ->
     false.
 
 remove_monitors(Key, Pid, MPid) ->
-    case ets:lookup(?TAB, {Pid, Key}) of
+    case shards:lookup(?TAB, {Pid, Key}) of
 	[{_, r}] ->
 	    [];
 	[{K, Opts}] when is_list(Opts) ->
@@ -295,7 +295,7 @@ remove_monitors(Key, Pid, MPid) ->
 		    Ms1 = [{P,R} || {P,R} <- Ms,
 				    P =/= MPid],
 		    NewMs = lists:keyreplace(monitors, 1, Opts, {monitors,Ms1}),
-		    ets:insert(?TAB, {K, NewMs}),
+		    shards:insert(?TAB, {K, NewMs}),
 		    [{insert, [{{Pid,Key}, NewMs}]}]
 	    end;
 	_ ->
@@ -326,7 +326,7 @@ ensure_monitor(Pid, _) when Pid == self() ->
     %% monitoring is ensured through a 'monitor_me' message
     ok;
 ensure_monitor(Pid, Scope) when Scope==g; Scope==l ->
-    case ets:insert_new(?TAB, {{Pid, Scope}}) of
+    case shards:insert_new(?TAB, {{Pid, Scope}}) of
         false -> ok;
         true  -> erlang:monitor(process, Pid)
     end.
@@ -342,7 +342,7 @@ remove_reg(Key, Pid, Event, Opts) ->
     [Reg, Rev].
 
 remove_reverse_mapping(Event, Pid, Key) ->
-    Opts = case ets:lookup(?TAB, {Pid, Key}) of
+    Opts = case shards:lookup(?TAB, {Pid, Key}) of
 	       [] ->       [];
 	       [{_, r}] -> [];
 	       [{_, L}] when is_list(L) ->
@@ -355,7 +355,7 @@ remove_reverse_mapping(Event, Pid, Key, Opts) when Event==unreg;
                                                    element(1,Event)==failover ->
     Rev = {Pid, Key},
     _ = notify(Event, Key, Opts),
-    ets:delete(?TAB, Rev),
+    shards:delete(?TAB, Rev),
     Rev.
 
 notify(Key, Opts) ->
@@ -439,7 +439,7 @@ remove_many(T, Scope, L, Pid) ->
                   end, L).
 
 unreg_opts(Key, Pid) ->
-    case ets:lookup(?TAB, {Pid, Key}) of
+    case shards:lookup(?TAB, {Pid, Key}) of
 	[] ->
 	    [];
 	[{_,r}] ->
@@ -449,25 +449,25 @@ unreg_opts(Key, Pid) ->
     end.
 
 remove_reg_1({c,_,_} = Key, Pid) ->
-    remove_counter_1(Key, ets:lookup_element(?TAB, Reg = {Key,Pid}, 3), Pid),
+    remove_counter_1(Key, shards:lookup_element(?TAB, Reg = {Key,Pid}, 3), Pid),
     Reg;
 remove_reg_1({r,_,_} = Key, Pid) ->
-    remove_resource_1(Key, ets:lookup_element(?TAB, Reg = {Key,Pid}, 3), Pid),
+    remove_resource_1(Key, shards:lookup_element(?TAB, Reg = {Key,Pid}, 3), Pid),
     Reg;
 remove_reg_1({T,_,_} = Key, _Pid) when T==a; T==n; T==rc ->
-    ets:delete(?TAB, Reg = {Key,T}),
+    shards:delete(?TAB, Reg = {Key,T}),
     Reg;
 remove_reg_1({_,_,_} = Key, Pid) ->
-    ets:delete(?TAB, Reg = {Key, Pid}),
+    shards:delete(?TAB, Reg = {Key, Pid}),
     Reg.
 
 remove_counter_1({c,C,N} = Key, Val, Pid) ->
-    Res = ets:delete(?TAB, {Key, Pid}),
+    Res = shards:delete(?TAB, {Key, Pid}),
     update_aggr_counter(C, N, -Val),
     Res.
 
 remove_resource_1({r,C,N} = Key, _, Pid) ->
-    Res = ets:delete(?TAB, {Key, Pid}),
+    Res = shards:delete(?TAB, {Key, Pid}),
     update_resource_count(C, N, -1),
     Res.
 
@@ -476,9 +476,9 @@ do_set_value({T,_,_} = Key, Value, Pid) ->
 	    T==n orelse T==a orelse T==rc -> T;
 	    true -> Pid
          end,
-    try ets:lookup_element(?TAB, {Key,K2}, 2) of
+    try shards:lookup_element(?TAB, {Key,K2}, 2) of
         Pid ->
-            ets:insert(?TAB, {{Key, K2}, Pid, Value});
+            shards:insert(?TAB, {{Key, K2}, Pid, Value});
         _ ->
             false
     catch
@@ -486,14 +486,14 @@ do_set_value({T,_,_} = Key, Value, Pid) ->
     end.
 
 do_set_counter_value({_,C,N} = Key, Value, Pid) ->
-    OldVal = ets:lookup_element(?TAB, {Key, Pid}, 3), % may fail with badarg
-    Res = ets:insert(?TAB, {{Key, Pid}, Pid, Value}),
+    OldVal = shards:lookup_element(?TAB, {Key, Pid}, 3), % may fail with badarg
+    Res = shards:insert(?TAB, {{Key, Pid}, Pid, Value}),
     update_aggr_counter(C, N, Value - OldVal),
     Res.
 
 update_counter({T,l,Ctr} = Key, Incr, Pid) when is_integer(Incr), T==c;
 						is_integer(Incr), T==n ->
-    Res = ets:update_counter(?TAB, {Key, Pid}, {3,Incr}),
+    Res = shards:update_counter(?TAB, {Key, Pid}, {3,Incr}),
     if T==c ->
 	    update_aggr_counter(l, Ctr, Incr);
        true ->
@@ -503,7 +503,7 @@ update_counter({T,l,Ctr} = Key, Incr, Pid) when is_integer(Incr), T==c;
 update_counter({T,l,Ctr} = Key, {Incr, Threshold, SetValue}, Pid)
   when is_integer(Incr), is_integer(Threshold), is_integer(SetValue), T==c;
        is_integer(Incr), is_integer(Threshold), is_integer(SetValue), T==n ->
-    [Prev, New] = ets:update_counter(?TAB, {Key, Pid},
+    [Prev, New] = shards:update_counter(?TAB, {Key, Pid},
 				     [{3, 0}, {3, Incr, Threshold, SetValue}]),
     if T==c ->
 	    update_aggr_counter(l, Ctr, New - Prev);
@@ -514,7 +514,7 @@ update_counter({T,l,Ctr} = Key, {Incr, Threshold, SetValue}, Pid)
 update_counter({T,l,Ctr} = Key, Ops, Pid) when is_list(Ops), T==c;
                                                is_list(Ops), T==r;
 					       is_list(Ops), T==n ->
-    case ets:update_counter(?TAB, {Key, Pid},
+    case shards:update_counter(?TAB, {Key, Pid},
 			    [{3, 0} | expand_ops(Ops)]) of
 	[_] ->
 	    [];
@@ -541,13 +541,13 @@ expand_ops(_) ->
     ?THROW_GPROC_ERROR(badarg).
 
 update_aggr_counter(C, N, Val) ->
-    ?MAY_FAIL(ets:update_counter(?TAB, {{a,C,N},a}, {3, Val})).
+    ?MAY_FAIL(shards:update_counter(?TAB, {{a,C,N},a}, {3, Val})).
 
 decrement_resource_count(C, N) ->
     update_resource_count(C, N, -1).
 
 update_resource_count(C, N, Val) ->
-    try ets:update_counter(?TAB, {{rc,C,N},rc}, {3, Val}) of
+    try shards:update_counter(?TAB, {{rc,C,N},rc}, {3, Val}) of
         0 ->
             resource_count_zero(C, N);
         _ ->
@@ -557,7 +557,7 @@ update_resource_count(C, N, Val) ->
     end.
 
 resource_count_zero(C, N) ->
-    case ets:lookup(?TAB, {K = {rc,C,N},rc}) of
+    case shards:lookup(?TAB, {K = {rc,C,N},rc}) of
         [{_, Pid, _}] ->
             case get_attr(on_zero, Pid, K, undefined) of
                 undefined -> ok;
@@ -586,7 +586,7 @@ perform_on_zero_(publish, C, N, Pid) ->
     ok;
 perform_on_zero_({unreg_shared, T,N}, C, _, _) ->
     K = {T, C, N},
-    case ets:member(?TAB, {K, shared}) of
+    case shards:member(?TAB, {K, shared}) of
         true ->
             Objs = remove_reg(K, shared, unreg),
             _ = if C == g -> self() ! {gproc_unreg, Objs};
@@ -601,12 +601,12 @@ perform_on_zero_(_, _, _, _) ->
 
 scan_existing_counters(Ctxt, Name) ->
     Head = {{{c,Ctxt,Name},'_'},'_','$1'},
-    Cs = ets:select(?TAB, [{Head, [], ['$1']}]),
+    Cs = shards:select(?TAB, [{Head, [], ['$1']}]),
     lists:sum(Cs).
 
 scan_existing_resources(Ctxt, Name) ->
     Head = {{{r,Ctxt,Name},'_'},'_','_'},
-    ets:select_count(?TAB, [{Head, [], [true]}]).
+    shards:select_count(?TAB, [{Head, [], [true]}]).
 
 valid_opts(Type, Default) ->
     Opts = get_app_env(Type, Default),

@@ -126,7 +126,7 @@ init(Parent, Starter, ApplData, Type) ->
     %% Insert ourselves as master for the process.  This ensures that
     %% the processes in the application can use get_env/1 at startup.
     Name = ApplData#appl_data.name,
-    ets:insert(ac_tab, {{application_master, Name}, self()}),
+    shards:insert(ac_tab, {{application_master, Name}, self()}),
     State = #state{appl_data = ApplData, gleader = OldGleader},
     case start_it(State, Type) of
 	{ok, Pid} ->          % apply(M,F,A) returned ok
