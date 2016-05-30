@@ -77,7 +77,7 @@
 subscribe(Scope, Event) when Scope==l; Scope==g ->
     gproc:reg({p,Scope,{?ETag, Event}}).
 
--spec subscribe_cond(scope(), event(), undefined | ets:match_spec()) -> true.
+-spec subscribe_cond(scope(), event(), undefined | shards:match_spec()) -> true.
 %% @doc Subscribe conditionally to events of type `Event'
 %%
 %% This function is similar to {@link subscribe/2}, but adds a condition
@@ -87,7 +87,7 @@ subscribe(Scope, Event) when Scope==l; Scope==g ->
 %% and a message is delivered only if the condition is true. Specifically,
 %% the test is:
 %%
-%% `ets:match_spec_run([Msg], ets:match_spec_compile(Cond)) == [true]'
+%% `shards:match_spec_run([Msg], shards:match_spec_compile(Cond)) == [true]'
 %%
 %% In other words, if the match_spec returns true for a message, that message
 %% is sent to the subscriber. For any other result from the match_spec, the
@@ -107,12 +107,12 @@ subscribe(Scope, Event) when Scope==l; Scope==g ->
 subscribe_cond(Scope, Event, Spec) when Scope==l; Scope==g ->
     case Spec of
 	undefined -> ok;
-	[_|_] -> _ = ets:match_spec_compile(Spec);  % validation
+	[_|_] -> _ = shards:match_spec_compile(Spec);  % validation
 	_ -> error(badarg)
     end,
     gproc:reg({p,Scope,{?ETag, Event}}, Spec).
 
--spec change_cond(scope(), event(), undefined | ets:match_spec()) -> true.
+-spec change_cond(scope(), event(), undefined | shards:match_spec()) -> true.
 %% @doc Change the condition specification of an existing subscription.
 %%
 %% This function atomically changes the condition spec of an existing
@@ -126,7 +126,7 @@ subscribe_cond(Scope, Event, Spec) when Scope==l; Scope==g ->
 change_cond(Scope, Event, Spec) when Scope==l; Scope==g ->
     case Spec of
 	undefined -> ok;
-	[_|_] -> _ = ets:match_spec_compile(Spec);  % validation
+	[_|_] -> _ = shards:match_spec_compile(Spec);  % validation
 	_ -> error(badarg)
     end,
     gproc:set_value({p,Scope,{?ETag, Event}}, Spec).
@@ -166,8 +166,8 @@ publish_cond(Scope, Event, Msg) when Scope==l; Scope==g ->
     lists:foreach(
       fun({Pid, undefined}) -> Pid ! Message;
 	 ({Pid, Spec}) ->
-	      try   C = ets:match_spec_compile(Spec),
-		    case ets:match_spec_run([Msg], C) of
+	      try   C = shards:match_spec_compile(Spec),
+		    case shards:match_spec_run([Msg], C) of
 			[true] -> Pid ! Message;
 			_ -> ok
 		    end

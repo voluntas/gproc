@@ -85,7 +85,7 @@ status() = 1 | 0
 ### change_cond/3 ###
 
 <pre><code>
-change_cond(Scope::<a href="#type-scope">scope()</a>, Event::<a href="#type-event">event()</a>, Spec::undefined | <a href="ets.md#type-match_spec">ets:match_spec()</a>) -&gt; true
+change_cond(Scope::<a href="#type-scope">scope()</a>, Event::<a href="#type-event">event()</a>, Spec::undefined | <a href="ets.md#type-match_spec">shards:match_spec()</a>) -&gt; true
 </code></pre>
 <br />
 
@@ -278,7 +278,7 @@ process.
 ### subscribe_cond/3 ###
 
 <pre><code>
-subscribe_cond(Scope::<a href="#type-scope">scope()</a>, Event::<a href="#type-event">event()</a>, Spec::undefined | <a href="ets.md#type-match_spec">ets:match_spec()</a>) -&gt; true
+subscribe_cond(Scope::<a href="#type-scope">scope()</a>, Event::<a href="#type-event">event()</a>, Spec::undefined | <a href="ets.md#type-match_spec">shards:match_spec()</a>) -&gt; true
 </code></pre>
 <br />
 
@@ -291,7 +291,7 @@ The condition is tested by the [`publish_cond/3`](#publish_cond-3) function
 and a message is delivered only if the condition is true. Specifically,
 the test is:
 
-`ets:match_spec_run([Msg], ets:match_spec_compile(Cond)) == [true]`
+`shards:match_spec_run([Msg], shards:match_spec_compile(Cond)) == [true]`
 
 In other words, if the match_spec returns true for a message, that message
 is sent to the subscriber. For any other result from the match_spec, the

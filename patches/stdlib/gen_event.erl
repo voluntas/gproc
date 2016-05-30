@@ -639,7 +639,7 @@ the_handlers(MSL) ->
 get_modules(MSL) ->
     Mods = lists:map(fun(Handler) -> Handler#handler.module end,
 		     MSL),
-    ordsets:to_list(ordsets:from_list(Mods)).
+    ordsshards:to_list(ordsshards:from_list(Mods)).
 
 %%-----------------------------------------------------------------
 %% Status information

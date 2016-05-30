@@ -536,7 +536,7 @@ os_env_key(Key) ->
     string:to_upper(atom_to_list(Key)).
 
 lookup_env(Scope, App, Key, P) ->
-    case ets:lookup(?TAB, {{p, Scope, {gproc_env, App, Key}}, P}) of
+    case shards:lookup(?TAB, {{p, Scope, {gproc_env, App, Key}}, P}) of
         [] ->
             undefined;
         [{_, _, Value}] ->
@@ -673,7 +673,7 @@ await1({T,g,_} = Key, Timeout) when T=:=n; T=:=a; T=:=rc ->
     ?CHK_DIST,
     request_wait(Key, Timeout);
 await1({T,l,_} = Key, Timeout) when T=:=n; T=:=a; T=:=rc ->
-    case ets:lookup(?TAB, {Key, T}) of
+    case shards:lookup(?TAB, {Key, T}) of
         [{_, Pid, Value}] ->
 	    case is_process_alive(Pid) of
 		true ->
@@ -1197,7 +1197,7 @@ existing(T,Scope,L) ->
               T==a; T==n ->
                    [{{T,Scope,K}, T} || K <- L]
            end,
-    _ = [case ets:member(?TAB, K) of
+    _ = [case shards:member(?TAB, K) of
              false -> erlang:error(badarg);
              true  -> true
          end || K <- Keys],
@@ -1219,7 +1219,7 @@ unreg1(Key) ->
         {T, l, _} when T == n; T == a; T == r; T == rc ->
             call({unreg, Key});
         {_, l, _} ->
-            case ets:member(?TAB, {Key,self()}) of
+            case shards:member(?TAB, {Key,self()}) of
                 true ->
                     _ = gproc_lib:remove_reg(Key, self(), unreg),
                     true;
@@ -1335,10 +1335,10 @@ unregister_name(Key) ->
 %% @doc Perform a select operation on the process registry
 %%
 %% When Arg = Contination, resume a gproc:select/1 operation
-%% (see {@link //stdlib/ets:select/1. ets:select/1}
+%% (see {@link //stdlib/shards:select/1. shards:select/1}
 %%
 %% When Arg = {@type sel_pattern()}, this function executes a select operation,
-%% emulating ets:select/1
+%% emulating shards:select/1
 %%
 %% {@link select/2} offers the opportunity to narrow the search
 %% (by limiting to only global or local scope, or a single type of object).
@@ -1352,7 +1352,7 @@ unregister_name(Key) ->
 %% {@type headpat()}.
 %% @end
 select({?TAB, _, _, _, _, _, _, _} = Continuation) ->
-    ets:select(Continuation);
+    shards:select(Continuation);
 select(Pat) ->
     select(all, Pat).
 
@@ -1373,7 +1373,7 @@ select(Pat) ->
 %% variable substitution and ensure that the scan is limited.
 %% @end
 select(Context, Pat) ->
-    ets:select(?TAB, pattern(Pat, Context)).
+    shards:select(?TAB, pattern(Pat, Context)).
 
 %% @spec (Context::context(), Pat::sel_patten(), Limit::integer()) ->
 %%          {[Match],Continuation} | '$end_of_table'
@@ -1382,7 +1382,7 @@ select(Context, Pat) ->
 %% See [http://www.erlang.org/doc/man/ets.html#select-3].
 %% @end
 select(Context, Pat, Limit) ->
-    ets:select(?TAB, pattern(Pat, Context), Limit).
+    shards:select(?TAB, pattern(Pat, Context), Limit).
 
 
 %% @spec (sel_pattern()) -> list(sel_object())
@@ -1400,7 +1400,7 @@ select_count(Pat) ->
 %% but the select patterns are transformed appropriately.
 %% @end
 select_count(Context, Pat) ->
-    ets:select_count(?TAB, pattern(Pat, Context)).
+    shards:select_count(?TAB, pattern(Pat, Context)).
 
 
 %%% Local properties can be registered in the local process, since
@@ -1514,12 +1514,12 @@ get_value(Key, Pid) ->
 
 get_value1({T,_,_} = Key, Pid) when is_pid(Pid) ->
     if T==n; T==a; T==rc ->
-            case ets:lookup(?TAB, {Key, T}) of
+            case shards:lookup(?TAB, {Key, T}) of
                 [{_, P, Value}] when P == Pid -> Value;
                 _ -> ?THROW_GPROC_ERROR(badarg)
             end;
        true ->
-            ets:lookup_element(?TAB, {Key, Pid}, 3)
+            shards:lookup_element(?TAB, {Key, Pid}, 3)
     end;
 get_value1({T,_,_} = K, shared) when T==c; T==a; T==p; T==r ->
     Key = case T of
@@ -1529,7 +1529,7 @@ get_value1({T,_,_} = K, shared) when T==c; T==a; T==p; T==r ->
 	      a  -> {K, a};
               rc -> {K, rc}
 	  end,
-    case ets:lookup(?TAB, Key) of
+    case shards:lookup(?TAB, Key) of
 	[{_, shared, Value}] -> Value;
 	_ -> ?THROW_GPROC_ERROR(badarg)
     end;
@@ -1574,7 +1574,7 @@ get_attribute_shared(Key, Attr) ->
 
 %% @private
 get_attribute1({_,_,_} = Key, Pid, A) when is_pid(Pid); Pid==shared ->
-    case ets:lookup(?TAB, {Pid, Key}) of
+    case shards:lookup(?TAB, {Pid, Key}) of
 	[{_, Attrs}] ->
 	    case lists:keyfind(attrs, 1, Attrs) of
 		false -> undefined;
@@ -1607,7 +1607,7 @@ get_attributes(Key, Pid) ->
     ?CATCH_GPROC_ERROR(get_attributes1(Key, Pid), [Key, Pid]).
 
 get_attributes1({_,_,_} = Key, Pid) when is_pid(Pid); Pid==shared ->
-    case ets:lookup(?TAB, {Pid, Key}) of
+    case shards:lookup(?TAB, {Pid, Key}) of
 	[{_, Attrs}] ->
 	    case lists:keyfind(attrs, 1, Attrs) of
 		false   -> [];
@@ -1637,7 +1637,7 @@ lookup_pid({_T,_,_} = Key) ->
 %% @end
 lookup_value({T,_,_} = Key) ->
     if T==n orelse T==a orelse T==rc ->
-            ets:lookup_element(?TAB, {Key,T}, 3);
+            shards:lookup_element(?TAB, {Key,T}, 3);
        true ->
             erlang:error(badarg)
     end.
@@ -1656,7 +1656,7 @@ where(Key) ->
 
 where1({T,_,_}=Key) ->
     if T==n orelse T==a orelse T==rc ->
-            case ets:lookup(?TAB, {Key,T}) of
+            case shards:lookup(?TAB, {Key,T}) of
                 [{_, P, _Value}] ->
                     case my_is_process_alive(P) of
                         true -> P;
@@ -1688,10 +1688,10 @@ whereis_name(Key) ->
 %%
 lookup_pids({T,_,_} = Key) ->
     L = if T==n orelse T==a orelse T==rc ->
-                ets:select(?TAB, [{{{Key,T}, '$1', '_'},
+                shards:select(?TAB, [{{{Key,T}, '$1', '_'},
 				   [{is_pid, '$1'}], ['$1']}]);
            true ->
-                ets:select(?TAB, [{{{Key,'_'}, '$1', '_'},
+                shards:select(?TAB, [{{{Key,'_'}, '$1', '_'},
 				   [{is_pid, '$1'}], ['$1']}])
         end,
     [P || P <- L, my_is_process_alive(P)].
@@ -1716,9 +1716,9 @@ my_is_process_alive(_) ->
 %%
 lookup_values({T,_,_} = Key) ->
     L = if T==n orelse T==a orelse T==rc ->
-                ets:select(?TAB, [{{{Key,T}, '$1', '$2'},[],[{{'$1','$2'}}]}]);
+                shards:select(?TAB, [{{{Key,T}, '$1', '$2'},[],[{{'$1','$2'}}]}]);
            true ->
-                ets:select(?TAB, [{{{Key,'_'}, '$1', '$2'},[],[{{'$1','$2'}}]}])
+                shards:select(?TAB, [{{{Key,'_'}, '$1', '$2'},[],[{{'$1','$2'}}]}])
         end,
     [Pair || {P,_} = Pair <- L, my_is_process_alive(P)].
 
@@ -1729,14 +1729,14 @@ lookup_values({T,_,_} = Key) ->
 %%
 %% @doc Updates the counter registered as Key for the current process.
 %%
-%% This function works almost exactly like ets:update_counter/3
+%% This function works almost exactly like shards:update_counter/3
 %% (see [http://www.erlang.org/doc/man/ets.html#update_counter-3]), but
 %% will fail if the type of object referred to by Key is not a counter or
 %% a unique name (update_counter/2 can be performed on names as well, but they
 %% do not count as counter objects, and do not affect aggregated counters).
 %%
 %% Aggregated counters with the same name will be updated automatically.
-%% The `UpdateOp' patterns are the same as for `ets:update_counter/3', except
+%% The `UpdateOp' patterns are the same as for `shards:update_counter/3', except
 %% that the position is omitted; in gproc, the value position is always `3'.
 %%
 %% If `Key' refers to a unique name, the operation will depend on the value
@@ -1822,14 +1822,14 @@ reset_counter1({T,g,_} = Key) when T==c; T==n ->
     ?CHK_DIST,
     gproc_dist:reset_counter(Key);
 reset_counter1({n,l,_} = Key) ->
-    [{_, Pid, Current}] = ets:lookup(?TAB, {Key, n}),
+    [{_, Pid, Current}] = shards:lookup(?TAB, {Key, n}),
     {Current, update_counter(Key, get_initial(Pid, Key) - Current)};
 reset_counter1({c,l,_} = Key) ->
-    Current = ets:lookup_element(?TAB, {Key, self()}, 3),
+    Current = shards:lookup_element(?TAB, {Key, self()}, 3),
     {Current, update_counter(Key, get_initial(self(), Key) - Current)}.
 
 get_initial(Pid, Key) ->
-    case ets:lookup(?TAB, {Pid, Key}) of
+    case shards:lookup(?TAB, {Pid, Key}) of
 	[{_, r}] -> 0;
 	[{_, Opts}] ->
 	    proplists:get_value(initial, Opts, 0)
@@ -1843,12 +1843,12 @@ get_initial(Pid, Key) ->
 %%
 %% @doc Updates the shared counter registered as Key.
 %%
-%% This function works almost exactly like ets:update_counter/3
+%% This function works almost exactly like shards:update_counter/3
 %% (see [http://www.erlang.org/doc/man/ets.html#update_counter-3]), but
 %% will fail if the type of object referred to by Key is not a counter.
 %%
 %% Aggregated counters with the same name will be updated automatically.
-%% The `UpdateOp' patterns are the same as for `ets:update_counter/3', except
+%% The `UpdateOp' patterns are the same as for `shards:update_counter/3', except
 %% that the position is omitted; in gproc, the value position is always `3'.
 %% @end
 %%
@@ -1923,7 +1923,7 @@ send(Key, Msg) ->
 
 send1({T,C,_} = Key, Msg) when C==l; C==g ->
     if T == n orelse T == a orelse T == rc ->
-            case ets:lookup(?TAB, {Key, T}) of
+            case shards:lookup(?TAB, {Key, T}) of
                 [{_, Pid, _}] ->
                     Pid ! Msg;
                 _ ->
@@ -1972,7 +1972,7 @@ bcast1(Ns, {T,l,_} = Key, Msg) when T==p; T==a; T==c; T==n; T==r; T==rc ->
 
 %% @spec (Context :: context()) -> key() | '$end_of_table'
 %%
-%% @doc Behaves as ets:first(Tab) for a given type of registration.
+%% @doc Behaves as shards:first(Tab) for a given type of registration.
 %%
 %% See [http://www.erlang.org/doc/man/ets.html#first-1].
 %%  The registry behaves as an ordered_set table.
@@ -1981,7 +1981,7 @@ bcast1(Ns, {T,l,_} = Key, Msg) when T==p; T==a; T==c; T==n; T==r; T==rc ->
 first(Context) ->
     {S, T} = get_s_t(Context),
     {HeadPat,_} = headpat({S, T}, '_', '_', '_'),
-    case ets:select(?TAB, [{HeadPat,[],[{element,1,'$_'}]}], 1) of
+    case shards:select(?TAB, [{HeadPat,[],[{element,1,'$_'}]}], 1) of
         {[First], _} ->
             First;
         _ ->
@@ -1990,7 +1990,7 @@ first(Context) ->
 
 %% @spec (Context :: context()) -> key() | '$end_of_table'
 %%
-%% @doc Behaves as ets:last(Tab) for a given type of registration.
+%% @doc Behaves as shards:last(Tab) for a given type of registration.
 %%
 %% See [http://www.erlang.org/doc/man/ets.html#last-1].
 %% The registry behaves as an ordered_set table.
@@ -2002,12 +2002,12 @@ last(Context) ->
             S == g -> h                         % 'h' comes between 'g' & 'l'
          end,
     Beyond = {{T,S1,[]},[]},
-    step(ets:prev(?TAB, Beyond), S, T).
+    step(shards:prev(?TAB, Beyond), S, T).
 
 
 %% @spec (Context::context(), Key::key()) -> key() | '$end_of_table'
 %%
-%% @doc Behaves as ets:next(Tab,Key) for a given type of registration.
+%% @doc Behaves as shards:next(Tab,Key) for a given type of registration.
 %%
 %% See [http://www.erlang.org/doc/man/ets.html#next-2].
 %% The registry behaves as an ordered_set table.
@@ -2022,7 +2022,7 @@ next(Context, K) ->
 	    {_,_,_} ->
 		{{K,[]}, true}  % [] is higher than pid(), shared, p, c...
 	end,
-    unwrap(Unwrap, step(ets:next(?TAB,Prev), S, T)).
+    unwrap(Unwrap, step(shards:next(?TAB,Prev), S, T)).
 
 unwrap(true, {{_,_,_} = R,_}) ->
     R;
@@ -2032,7 +2032,7 @@ unwrap(_, R) ->
 
 %% @spec (Context::context(), Key::key()) -> key() | '$end_of_table'
 %%
-%% @doc Behaves as ets:prev(Tab,Key) for a given type of registration.
+%% @doc Behaves as shards:prev(Tab,Key) for a given type of registration.
 %%
 %% See [http://www.erlang.org/doc/man/ets.html#prev-2].
 %% The registry behaves as an ordered_set table.
@@ -2046,7 +2046,7 @@ prev(Context, K) ->
 	    {_,_,_} ->
 		{{K,1}, true}
 	end,
-    unwrap(Unwrap, step(ets:prev(?TAB, Prev), S, T)).
+    unwrap(Unwrap, step(shards:prev(?TAB, Prev), S, T)).
 
 step(Key, '_', '_') ->
     case Key of
@@ -2131,7 +2131,7 @@ to_atom(S) ->
     end.
 
 gproc_info(Pid, Pat) ->
-    Keys = ets:select(?TAB, [{ {{Pid,Pat}, '_'}, [], [{element,2,
+    Keys = shards:select(?TAB, [{ {{Pid,Pat}, '_'}, [], [{element,2,
 						       {element,1,'$_'}}] }]),
     {?MODULE, lists:zf(
                 fun(K) ->
@@ -2166,7 +2166,7 @@ handle_cast({audit_process, Pid}, S) ->
     end,
     {noreply, S};
 handle_cast({cancel_wait, Pid, {T,_,_} = Key, Ref}, S) ->
-     _ = case ets:lookup(?TAB, {Key,T}) of
+     _ = case shards:lookup(?TAB, {Key,T}) of
 	     [{_, Waiters}] ->
 		 gproc_lib:remove_wait(Key, Pid, Ref, Waiters);
 	     _ ->
@@ -2174,7 +2174,7 @@ handle_cast({cancel_wait, Pid, {T,_,_} = Key, Ref}, S) ->
 	 end,
     {noreply, S};
 handle_cast({cancel_wait_or_monitor, Pid, {T,_,_} = Key}, S) ->
-    _ = case ets:lookup(?TAB, {Key, T}) of
+    _ = case shards:lookup(?TAB, {Key, T}) of
 	    [{_, Waiters}] ->
 		gproc_lib:remove_wait(Key, Pid, all, Waiters);
 	    [{_, OtherPid, _}] ->
@@ -2213,7 +2213,7 @@ handle_call({reg_or_locate, {T,l,_} = Key, Val, P}, _, S) ->
 		  _ = gproc_lib:ensure_monitor(Pid, l),
 		  {reply, {Pid, Val}, S}
 	  end,
-    case ets:lookup(?TAB, {Key, T}) of
+    case shards:lookup(?TAB, {Key, T}) of
 	[] ->
 	    Reg();
 	[{_, _Waiters}] ->
@@ -2224,7 +2224,7 @@ handle_call({reg_or_locate, {T,l,_} = Key, Val, P}, _, S) ->
 handle_call({monitor, {T,l,_} = Key, Pid, Type}, _From, S)
   when T==n; T==a ->
     Ref = make_ref(),
-    Lookup = ets:lookup(?TAB, {Key, T}),
+    Lookup = shards:lookup(?TAB, {Key, T}),
     IsRegged = is_regged(Lookup),
     _ = case {IsRegged, Type} of
 	    {false, info} ->
@@ -2235,11 +2235,11 @@ handle_call({monitor, {T,l,_} = Key, Pid, Type}, _From, S)
                 case Lookup of
                     [{K, Waiters}] ->
                         NewWaiters = [{Pid,Ref,follow}|Waiters],
-                        ets:insert(?TAB, {K, NewWaiters}),
-                        ets:insert_new(?TAB, {{Pid,Key}, []});
+                        shards:insert(?TAB, {K, NewWaiters}),
+                        shards:insert_new(?TAB, {{Pid,Key}, []});
                     [] ->
-                        ets:insert(?TAB, {{Key,T}, [{Pid,Ref,follow}]}),
-                        ets:insert_new(?TAB, {{Pid,Key}, []})
+                        shards:insert(?TAB, {{Key,T}, [{Pid,Ref,follow}]}),
+                        shards:insert_new(?TAB, {{Pid,Key}, []})
                 end;
             {false, standby} ->
                 Evt = {failover, Pid},
@@ -2249,14 +2249,14 @@ handle_call({monitor, {T,l,_} = Key, Pid, Type}, _From, S)
 	    {true, _} ->
                 [{_, RegPid, _}] = Lookup,
                 _ = gproc_lib:ensure_monitor(Pid, l),
-		case ets:lookup(?TAB, {RegPid, Key}) of
+		case shards:lookup(?TAB, {RegPid, Key}) of
 		    [{K,r}] ->
-			ets:insert(?TAB, {K, [{monitor, [{Pid,Ref,Type}]}]}),
-                        ets:insert_new(?TAB, {{Pid,Key}, []});
+			shards:insert(?TAB, {K, [{monitor, [{Pid,Ref,Type}]}]}),
+                        shards:insert_new(?TAB, {{Pid,Key}, []});
 		    [{K, Opts}] ->
-			ets:insert(?TAB, {K, gproc_lib:add_monitor(
+			shards:insert(?TAB, {K, gproc_lib:add_monitor(
                                                Opts, Pid, Ref, Type)}),
-                        ets:insert_new(?TAB, {{Pid,Key}, []})
+                        shards:insert_new(?TAB, {{Pid,Key}, []})
 		end
 	end,
     {reply, Ref, S};
@@ -2266,11 +2266,11 @@ handle_call({demonitor, {T,l,_} = Key, Ref, Pid}, _From, S)
 	    undefined ->
 		ok;  % be nice
 	    RegPid ->
-		case ets:lookup(?TAB, {RegPid, Key}) of
+		case shards:lookup(?TAB, {RegPid, Key}) of
 		    [{_K,r}] ->
 			ok;   % be nice
 		    [{K, Opts}] ->
-			ets:insert(?TAB, {K, gproc_lib:remove_monitor(
+			shards:insert(?TAB, {K, gproc_lib:remove_monitor(
 					       Opts, Pid, Ref)})
 		end
 	end,
@@ -2291,7 +2291,7 @@ handle_call({unreg, {_,l,_} = Key}, {Pid,_}, S) ->
 handle_call({unreg_other, {_,l,_} = Key, Pid}, _, S) ->
     handle_unreg_call(Key, Pid, S);
 handle_call({unreg_shared, {_,l,_} = Key}, _, S) ->
-    _ = case ets:lookup(?TAB, {shared, Key}) of
+    _ = case shards:lookup(?TAB, {shared, Key}) of
 	    [{_, r}] ->
 		_ = gproc_lib:remove_reg(Key, shared, unreg, []);
 	    [{_, Opts}] ->
@@ -2360,12 +2360,12 @@ handle_info(_, S) ->
 %% @hidden
 code_change(_FromVsn, S, _Extra) ->
     %% We have changed local monitor markers from {Pid} to {Pid,l}.
-    _ = case ets:select(?TAB, [{{'$1'},[],['$1']}]) of
+    _ = case shards:select(?TAB, [{{'$1'},[],['$1']}]) of
             [] ->
                 ok;
             Pids ->
-                ets:insert(?TAB, [{P,l} || P <- Pids]),
-                ets:select_delete(?TAB, [{{'_'},[],[true]}])
+                shards:insert(?TAB, [{P,l} || P <- Pids]),
+                shards:select_delete(?TAB, [{{'_'},[],[true]}])
         end,
     {ok, S}.
 
@@ -2389,7 +2389,7 @@ handle_reg_call(Key, Pid, Val, Attrs, S) ->
     end.
 
 handle_unreg_call(Key, Pid, S) ->
-    case ets:lookup(?TAB, {Pid,Key}) of
+    case shards:lookup(?TAB, {Pid,Key}) of
         [{_, r}] ->
             _ = gproc_lib:remove_reg(Key, Pid, unreg, []),
             {reply, true, S};
@@ -2436,7 +2436,7 @@ cast(N, Msg, l) ->
 try_insert_reg({T,l,_} = Key, Val, Pid) ->
     case gproc_lib:insert_reg(Key, Val, Pid, l) of
         false ->
-            case ets:lookup(?TAB, {Key,T}) of
+            case shards:lookup(?TAB, {Key,T}) of
                 %% In this particular case, the lookup cannot result in
                 %% [{_, Waiters}], since the insert_reg/4 function would
                 %% have succeeded then.
@@ -2456,9 +2456,9 @@ try_insert_reg({T,l,_} = Key, Val, Pid) ->
     end.
 
 %% try_insert_shared({c,l,_} = Key, Val) ->
-%%     ets:insert_new(?TAB, [{{Key,shared}, shared, Val}, {{shared, Key}, []}]);
+%%     shards:insert_new(?TAB, [{{Key,shared}, shared, Val}, {{shared, Key}, []}]);
 %% try_insert_shared({a,l,_} = Key, Val) ->
-%%     ets:insert_new(?TAB, [{{Key, a}, shared, Val}, {{shared, Key}, []}]).
+%%     shards:insert_new(?TAB, [{{Key, a}, shared, Val}, {{shared, Key}, []}]).
 
 -spec audit_process(pid()) -> ok.
 
@@ -2472,36 +2472,36 @@ nb_audit_process(Pid) when is_pid(Pid) ->
 
 process_is_down(Pid) when is_pid(Pid) ->
     %% delete the monitor marker
-    %% io:fwrite(user, "process_is_down(~p) - ~p~n", [Pid,ets:tab2list(?TAB)]),
+    %% io:fwrite(user, "process_is_down(~p) - ~p~n", [Pid,shards:tab2list(?TAB)]),
     Marker = {Pid,l},
-    case ets:member(?TAB, Marker) of
+    case shards:member(?TAB, Marker) of
         false ->
             ok;
         true ->
-            Revs = ets:select(?TAB, [{{{Pid,'$1'}, '$2'},
+            Revs = shards:select(?TAB, [{{{Pid,'$1'}, '$2'},
                                       [{'==',{element,2,'$1'},l}],
 				      [{{'$1','$2'}}]}]),
             lists:foreach(
               fun({{n,l,_}=K, R}) ->
                       Key = {K,n},
-                      case ets:lookup(?TAB, Key) of
+                      case shards:lookup(?TAB, Key) of
                           [{_, Pid, V}] ->
-                              ets:delete(?TAB, Key),
+                              shards:delete(?TAB, Key),
 			      opt_notify(R, K, Pid, V);
                           [{_, Waiters}] ->
                               case [W || W <- Waiters,
                                          element(1,W) =/= Pid] of
                                   [] ->
-                                      ets:delete(?TAB, Key);
+                                      shards:delete(?TAB, Key);
                                   Waiters1 ->
-                                      ets:insert(?TAB, {Key, Waiters1})
+                                      shards:insert(?TAB, {Key, Waiters1})
                               end;
                           [{_, OtherPid, _}] when Pid =/= OtherPid ->
-                              case ets:lookup(?TAB, {OtherPid, K}) of
+                              case shards:lookup(?TAB, {OtherPid, K}) of
                                   [{RK, Opts}] when is_list(Opts) ->
                                       Opts1 = gproc_lib:remove_monitor_pid(
                                                 Opts, Pid),
-                                      ets:insert(?TAB, {RK, Opts1});
+                                      shards:insert(?TAB, {RK, Opts1});
                                   _ ->
                                       true
                               end;
@@ -2510,36 +2510,36 @@ process_is_down(Pid) when is_pid(Pid) ->
                       end;
                  ({{c,l,C} = K, _}) ->
                       Key = {K, Pid},
-                      [{_, _, Value}] = ets:lookup(?TAB, Key),
-                      ets:delete(?TAB, Key),
+                      [{_, _, Value}] = shards:lookup(?TAB, Key),
+                      shards:delete(?TAB, Key),
                       gproc_lib:update_aggr_counter(l, C, -Value);
                  ({{r,l,Rsrc} = K, _}) ->
                       Key = {K, Pid},
-                      ets:delete(?TAB, Key),
+                      shards:delete(?TAB, Key),
                       gproc_lib:decrement_resource_count(l, Rsrc);
                  ({{rc,l,_} = K, R}) ->
                       remove_aggregate(rc, K, R, Pid);
                  ({{a,l,_} = K, R}) ->
                       remove_aggregate(a, K, R, Pid);
                  ({{p,_,_} = K, _}) ->
-                      ets:delete(?TAB, {K, Pid})
+                      shards:delete(?TAB, {K, Pid})
               end, Revs),
-            ets:select_delete(?TAB, [{{{Pid,{'_',l,'_'}},'_'}, [], [true]}]),
-            ets:delete(?TAB, Marker),
+            shards:select_delete(?TAB, [{{{Pid,{'_',l,'_'}},'_'}, [], [true]}]),
+            shards:delete(?TAB, Marker),
             ok
     end.
 
 remove_aggregate(T, K, R, Pid) ->
-    case ets:lookup(?TAB, {K,T}) of
+    case shards:lookup(?TAB, {K,T}) of
         [{_, Pid, V}] ->
-            ets:delete(?TAB, {K,T}),
+            shards:delete(?TAB, {K,T}),
             opt_notify(R, K, Pid, V);
         [{_, OtherPid, _}] when Pid =/= OtherPid ->
-            case ets:lookup(?TAB, {OtherPid, K}) of
+            case shards:lookup(?TAB, {OtherPid, K}) of
                 [{RK, Opts}] when is_list(Opts) ->
                     Opts1 = gproc_lib:remove_monitor_pid(
                               Opts, Pid),
-                    ets:insert(?TAB, {RK, Opts1});
+                    shards:insert(?TAB, {RK, Opts1});
                 _ ->
                     true
             end;
@@ -2561,7 +2561,7 @@ opt_notify(Opts, {T,_,_} = Key, Pid, Value) ->
                     gproc_lib:notify(unreg, Key, Opts),
                     ok;
                 {ToPid, Ref} ->
-                    ets:insert(?TAB, [{{Key,T}, ToPid, Value},
+                    shards:insert(?TAB, [{{Key,T}, ToPid, Value},
                                       {{ToPid, Key},
                                        gproc_lib:remove_monitor(
                                          Opts, ToPid, Ref)}]),
@@ -2577,7 +2577,7 @@ keep_followers(Opts, {T,_,_} = Key) ->
         [] ->
             ok;
         [_|_] = F ->
-            ets:insert(?TAB, {{Key,T}, F})
+            shards:insert(?TAB, {{Key,T}, F})
     end.
 
 pick_standby([{Pid, Ref, standby}|T]) when node(Pid) =:= node() ->
@@ -2597,7 +2597,7 @@ pick_standby([]) ->
 
 do_give_away({T,l,_} = K, To, Pid) when T==n; T==a; T==rc ->
     Key = {K, T},
-    case ets:lookup(?TAB, Key) of
+    case shards:lookup(?TAB, Key) of
         [{_, Pid, Value}] ->
             %% Pid owns the reg; allowed to give_away
             case pid_to_give_away_to(To) of
@@ -2606,7 +2606,7 @@ do_give_away({T,l,_} = K, To, Pid) when T==n; T==a; T==rc ->
                     %% but nothing needs to be done.
                     Pid;
                 ToPid when is_pid(ToPid) ->
-                    ets:insert(?TAB, [{Key, ToPid, Value},
+                    shards:insert(?TAB, [{Key, ToPid, Value},
                                       {{ToPid, K}, []}]),
 		    _ = gproc_lib:remove_reverse_mapping({migrated,ToPid}, Pid, K),
                     _ = gproc_lib:ensure_monitor(ToPid, l),
@@ -2620,19 +2620,19 @@ do_give_away({T,l,_} = K, To, Pid) when T==n; T==a; T==rc ->
     end;
 do_give_away({T,l,_} = K, To, Pid) when T==c; T==p; T==r ->
     Key = {K, Pid},
-    case ets:lookup(?TAB, Key) of
+    case shards:lookup(?TAB, Key) of
         [{_, Pid, Value}] ->
             case pid_to_give_away_to(To) of
                 ToPid when is_pid(ToPid) ->
                     ToKey = {K, ToPid},
-                    case ets:member(?TAB, ToKey) of
+                    case shards:member(?TAB, ToKey) of
                         true ->
                             badarg;
                         false ->
-                            ets:insert(?TAB, [{ToKey, ToPid, Value},
+                            shards:insert(?TAB, [{ToKey, ToPid, Value},
                                               {{ToPid, K}, []}]),
-                            ets:delete(?TAB, {Pid, K}),
-                            ets:delete(?TAB, Key),
+                            shards:delete(?TAB, {Pid, K}),
+                            shards:delete(?TAB, Key),
                             _ = gproc_lib:ensure_monitor(ToPid, l),
                             ToPid
                     end;
@@ -2648,7 +2648,7 @@ do_give_away({T,l,_} = K, To, Pid) when T==c; T==p; T==r ->
 pid_to_give_away_to(P) when is_pid(P), node(P) == node() ->
     P;
 pid_to_give_away_to({T,l,_} = Key) when T==n; T==a; T==rc ->
-    case ets:lookup(?TAB, {Key, T}) of
+    case shards:lookup(?TAB, {Key, T}) of
         [{_, Pid, _}] ->
             Pid;
         _ ->
@@ -2658,9 +2658,9 @@ pid_to_give_away_to({T,l,_} = Key) when T==n; T==a; T==rc ->
 create_tabs() ->
     Opts = gproc_lib:valid_opts(ets_options, [{write_concurrency,true},
 					      {read_concurrency, true}]),
-    case ets:info(?TAB, name) of
+    case shards:info(?TAB, name) of
         undefined ->
-            ets:new(?TAB, [ordered_set, public, named_table | Opts]);
+            shards:new(?TAB, [ordered_set, public, named_table | Opts]);
         _ ->
             ok
     end.
@@ -2672,17 +2672,17 @@ init([]) ->
 
 
 set_monitors() ->
-    set_monitors(ets:select(?TAB, [{{{'$1',l}},[],['$1']}], 100)).
+    set_monitors(shards:select(?TAB, [{{{'$1',l}},[],['$1']}], 100)).
 
 
 set_monitors('$end_of_table') ->
     ok;
 set_monitors({Pids, Cont}) ->
     _ = [erlang:monitor(process,Pid) || Pid <- Pids],
-    set_monitors(ets:select(Cont)).
+    set_monitors(shards:select(Cont)).
 
 monitor_me() ->
-    case ets:insert_new(?TAB, {{self(),l}}) of
+    case shards:insert_new(?TAB, {{self(),l}}) of
         false -> true;
         true  ->
             cast({monitor_me,self()}),
@@ -2912,7 +2912,7 @@ table(Context, Opts) ->
                  (is_sorted_key) -> true;
                  (num_of_objects) ->
                       %% this is just a guesstimate.
-                      trunc(ets:info(?TAB,size) / 2.5)
+                      trunc(shards:info(?TAB,size) / 2.5)
               end,
     LookupFun =
         case Traverse of
@@ -2936,7 +2936,7 @@ qlc_lookup(_Scope, 1, Keys, Check) ->
       fun(Key) ->
               remove_dead(
 		Check,
-		ets:select(?TAB, [{ {{Key,'_'},'_','_'}, [],
+		shards:select(?TAB, [{ {{Key,'_'},'_','_'}, [],
 				    [{{ {element,1,{element,1,'$_'}},
 					{element,2,'$_'},
 					{element,3,'$_'} }}] }]))
@@ -2961,14 +2961,14 @@ qlc_lookup_pid(Pid, Scope, Check) ->
 	    [];
 	false ->
 	    Found =
-		ets:select(?TAB, [{{{Pid, rev_keypat(Scope)}, '_'},
+		shards:select(?TAB, [{{{Pid, rev_keypat(Scope)}, '_'},
 				   [], ['$_']}]),
 	    lists:flatmap(
 	      fun({{_,{T,_,_}=K}, _}) ->
 		      K2 = if T==n orelse T==a -> T;
 			      true -> Pid
 			   end,
-		      case ets:lookup(?TAB, {K,K2}) of
+		      case shards:lookup(?TAB, {K,K2}) of
 			  [{{Key,_},_,Value}] ->
 			      [{Key, Pid, Value}];
 			  [] ->
@@ -2980,7 +2980,7 @@ qlc_lookup_pid(Pid, Scope, Check) ->
 
 qlc_next(_, '$end_of_table', _) -> [];
 qlc_next(Scope, K, Check) ->
-    case ets:lookup(?TAB, K) of
+    case shards:lookup(?TAB, K) of
         [{{Key,_}, Pid, V}] ->
 	    case Check andalso ?PID_IS_DEAD(Pid) of
 		true ->
@@ -2997,7 +2997,7 @@ qlc_next(Scope, K, Check) ->
 
 qlc_prev(_, '$end_of_table', _) -> [];
 qlc_prev(Scope, K, Check) ->
-    case ets:lookup(?TAB, K) of
+    case shards:lookup(?TAB, K) of
         [{{Key,_},Pid,V}] ->
 	    case Check andalso ?PID_IS_DEAD(Pid) of
 		true ->
@@ -3019,12 +3019,12 @@ qlc_select(true, {Objects, Cont}) ->
 	       not ?PID_IS_DEAD(Pid)] of
 	[] ->
 	    %% re-run search
-	    qlc_select(true, ets:select(Cont));
+	    qlc_select(true, shards:select(Cont));
 	Found ->
-	    Found ++ fun() -> qlc_select(true, ets:select(Cont)) end
+	    Found ++ fun() -> qlc_select(true, shards:select(Cont)) end
     end;
 qlc_select(false, {Objects, Cont}) ->
-    Objects ++ fun() -> qlc_select(false, ets:select(Cont)) end.
+    Objects ++ fun() -> qlc_select(false, shards:select(Cont)) end.
 
 
 is_unique(n) -> true;

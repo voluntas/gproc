@@ -93,15 +93,15 @@ unsubscribe({T,S,_} = Key) when (T==n orelse T==a)
 %%--------------------------------------------------------------------
 start_link() ->
     Me = self(),
-    _ = case ets:info(?TAB, owner) of
+    _ = case shards:info(?TAB, owner) of
 	    undefined ->
-		ets:new(?TAB, [ordered_set, protected, named_table,
+		shards:new(?TAB, [ordered_set, protected, named_table,
 			       {heir, self(), []}]);
 	    Me ->
 		ok
 	end,
     {ok, Pid} = proc_lib:start_link(?MODULE, init, [Me]),
-    ets:give_away(?TAB, Pid, []),
+    shards:give_away(?TAB, Pid, []),
     {ok, Pid}.
 
 %%%===================================================================
@@ -176,23 +176,23 @@ handle_cast({unsubscribe, Pid, Key}, State) ->
 %% @end
 %%--------------------------------------------------------------------
 handle_info({gproc, unreg, _Ref, Name}, State) ->
-    ets:delete(?TAB, {m, Name}),
+    shards:delete(?TAB, {m, Name}),
     do_monitor(Name, undefined),
     notify(Name, undefined),
     {noreply, State};
 handle_info({gproc, {migrated,ToPid}, _Ref, Name}, State) ->
-    ets:delete(?TAB, {m, Name}),
+    shards:delete(?TAB, {m, Name}),
     do_monitor(Name, ToPid),
     notify(Name, {migrated, ToPid}),
     {noreply, State};
 handle_info({gproc, {failover,ToPid}, _Ref, Name}, State) ->
-    ets:delete(?TAB, {m, Name}),
+    shards:delete(?TAB, {m, Name}),
     do_monitor(Name, ToPid),
     notify(Name, {failover, ToPid}),
     {noreply, State};
 handle_info({gproc, _, registered, {{T,_,_} = Name, Pid, _}}, State)
   when T==n; T==a ->
-    ets:delete(?TAB, {w, Name}),
+    shards:delete(?TAB, {w, Name}),
     do_monitor(Name, Pid),
     notify(Name, Pid),
     {noreply, State};
@@ -233,56 +233,56 @@ code_change(_OldVsn, State, _Extra) ->
 %%%===================================================================
 
 add_subscription(Pid, {_,_,_} = Key) when is_pid(Pid) ->
-    ets:insert(?TAB, [{{s, Key, Pid}}, {{r, Pid, Key}}]).
+    shards:insert(?TAB, [{{s, Key, Pid}}, {{r, Pid, Key}}]).
 
 del_subscription(Pid, Key) ->
-    ets:delete(?TAB, {{s, Key, Pid}}),
-    ets:delete(?TAB, {{r, Pid, Key}}),
+    shards:delete(?TAB, {{s, Key, Pid}}),
+    shards:delete(?TAB, {{r, Pid, Key}}),
     maybe_cancel_wait(Key).
 
 do_monitor(Name, undefined) ->
-    case ets:member(?TAB, {w, Name}) of
+    case shards:member(?TAB, {w, Name}) of
 	false ->
 	    Ref = gproc:nb_wait(Name),
-	    ets:insert(?TAB, {{w, Name}, Ref});
+	    shards:insert(?TAB, {{w, Name}, Ref});
         true ->
             ok
     end;
 do_monitor(Name, Pid) when is_pid(Pid) ->
-    case ets:member(?TAB, {m, Name}) of
+    case shards:member(?TAB, {m, Name}) of
 	true ->
 	    ok;
 	_ ->
 	    Ref = gproc:monitor(Name),
-	    ets:insert(?TAB, {{m, Name}, Ref})
+	    shards:insert(?TAB, {{m, Name}, Ref})
     end.
 
 monitor_pid(Pid) when is_pid(Pid) ->
-    case ets:member(?TAB, {p,Pid}) of
+    case shards:member(?TAB, {p,Pid}) of
 	false ->
 	    Ref = erlang:monitor(process, Pid),
-	    ets:insert(?TAB, {{p,Pid}, Ref});
+	    shards:insert(?TAB, {{p,Pid}, Ref});
 	true ->
 	    ok
     end.
 
 pid_is_down(Pid) ->
-    Keys = ets:select(?TAB, [{ {{r, Pid, '$1'}}, [], ['$1'] }]),
-    ets:select_delete(?TAB, [{ {{r, Pid, '$1'}}, [], [true] }]),
+    Keys = shards:select(?TAB, [{ {{r, Pid, '$1'}}, [], ['$1'] }]),
+    shards:select_delete(?TAB, [{ {{r, Pid, '$1'}}, [], [true] }]),
     lists:foreach(fun(K) ->
-			  ets:delete(?TAB, {s,K,Pid}),
+			  shards:delete(?TAB, {s,K,Pid}),
 			  maybe_cancel_wait(K)
 		  end, Keys),
-    ets:delete(?TAB, {p, Pid}).
+    shards:delete(?TAB, {p, Pid}).
 
 maybe_cancel_wait(K) ->
-    case ets:next(?TAB, {s,K}) of
+    case shards:next(?TAB, {s,K}) of
 	{s,K,P} when is_pid(P) ->
 	    ok;
 	_ ->
 	    gproc:cancel_wait_or_monitor(K),
-	    ets:delete(?TAB, {m, K}),
-	    ets:delete(?TAB, {w, K})
+	    shards:delete(?TAB, {m, K}),
+	    shards:delete(?TAB, {w, K})
     end.
 
 notify(Name, Where) ->

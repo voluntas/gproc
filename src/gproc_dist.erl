@@ -282,7 +282,7 @@ handle_call(_, _, S, _) ->
     {reply, badarg, S}.
 
 handle_info({'DOWN', _MRef, process, Pid, _}, S) ->
-    ets:delete(?TAB, {Pid, g}),
+    shards:delete(?TAB, {Pid, g}),
     leader_cast({pid_is_DOWN, Pid}),
     {ok, S};
 handle_info({gproc_unreg, Objs}, S) ->
@@ -313,8 +313,8 @@ elected(S, _E, _Node) ->
     end.
 
 globs() ->
-    Gs = ets:select(?TAB, [{{{{'_',g,'_'},'_'},'_','_'},[],['$_']}]),
-    As = ets:select(?TAB, [{{{'$1',{'_',g,'_'}}, '$2'},[],['$_']}]),
+    Gs = shards:select(?TAB, [{{{{'_',g,'_'},'_'},'_','_'},[],['$_']}]),
+    As = shards:select(?TAB, [{{{'$1',{'_',g,'_'}}, '$2'},[],['$_']}]),
     _ = [gproc_lib:ensure_monitor(Pid, g) || {_, Pid, _} <- Gs],
     Gs ++ As.
 
@@ -333,7 +333,7 @@ handle_DOWN(Node, S, _E) ->
     S1 = check_sync_requests(Node, S),
     Head = {{{'_',g,'_'},'_'},'$1','_'},
     Gs = [{'==', {node,'$1'},Node}],
-    Globs = ets:select(?TAB, [{Head, Gs, [{{{element,1,{element,1,'$_'}},
+    Globs = shards:select(?TAB, [{Head, Gs, [{{{element,1,{element,1,'$_'}},
                                             {element,2,'$_'}}}]}]),
     case process_globals(Globs) of
         [] ->
@@ -380,14 +380,14 @@ handle_leader_call({Reg, {_C,g,_Name} = K, Value, Pid, As}, _From, S, _E)
     end;
 handle_leader_call({monitor, {T,g,_} = K, MPid, Type}, _From, S, _E) when T==n;
                                                                           T==a ->
-    case ets:lookup(?TAB, {K, T}) of
+    case shards:lookup(?TAB, {K, T}) of
         [{_, Pid, _}] ->
             Opts = get_opts(Pid, K),
             Ref = make_ref(),
             Opts1 = gproc_lib:add_monitor(Opts, MPid, Ref, Type),
             _ = gproc_lib:ensure_monitor(MPid, g),
             Obj = {{Pid,K}, Opts1},
-            ets:insert(?TAB, Obj),
+            shards:insert(?TAB, Obj),
             {reply, Ref, [{insert, [Obj]}], S};
         LookupRes ->
             Ref = make_ref(),
@@ -397,7 +397,7 @@ handle_leader_call({monitor, {T,g,_} = K, MPid, Type}, _From, S, _E) when T==n;
                     Msgs = insert_reg(LookupRes, K, undefined, MPid, Event),
                     Obj = {{K,T}, MPid, undefined},
                     Rev = {{MPid,K}, []},
-                    ets:insert(?TAB, [Obj, Rev]),
+                    shards:insert(?TAB, [Obj, Rev]),
                     MPid ! {gproc, {failover,MPid}, Ref, K},
                     {reply, Ref, [{insert, [Obj, Rev]},
                                   {notify, Msgs}], S};
@@ -408,11 +408,11 @@ handle_leader_call({monitor, {T,g,_} = K, MPid, Type}, _From, S, _E) when T==n;
                         [] ->
                             add_follow_to_waiters([], K, MPid, Ref, S);
                         [{_, Pid, _}] ->
-                            case ets:lookup(?TAB, {Pid,K}) of
+                            case shards:lookup(?TAB, {Pid,K}) of
                                 [{_, Opts}] when is_list(Opts) ->
                                     Opts1 = gproc_lib:add_monitor(
                                               Opts, MPid, Ref, follow),
-                                    ets:insert(?TAB, {{Pid,K}, Opts1}),
+                                    shards:insert(?TAB, {{Pid,K}, Opts1}),
                                     {reply, Ref,
                                      [{insert, [{{Pid,K}, Opts1}]}], S}
                             end
@@ -423,13 +423,13 @@ handle_leader_call({monitor, {T,g,_} = K, MPid, Type}, _From, S, _E) when T==n;
             end
     end;
 handle_leader_call({demonitor, {T,g,_} = K, MPid, Ref}, _From, S, _E) ->
-    case ets:lookup(?TAB, {K,T}) of
+    case shards:lookup(?TAB, {K,T}) of
         [{_, Pid, _}] ->
             Opts = get_opts(Pid, K),
             Opts1 = gproc_lib:remove_monitors(Opts, MPid, Ref),
             Obj = {{Pid,K}, Opts1},
-            ets:insert(?TAB, Obj),
-            ets:delete(?TAB, {MPid, K}),
+            shards:insert(?TAB, Obj),
+            shards:delete(?TAB, {MPid, K}),
             {reply, ok, [{delete, [{MPid,K}]},
                          {insert, [Obj]}], S};
         [{Key, Waiters}] ->
@@ -464,7 +464,7 @@ handle_leader_call({reg_or_locate, {n,g,_} = K, Value, P},
 			  {reply, badarg, S}
 		  end
 	  end,
-    case ets:lookup(?TAB, {K, n}) of
+    case shards:lookup(?TAB, {K, n}) of
 	[] ->
 	    Reg();
 	[{_, _Waiters}] ->
@@ -475,9 +475,9 @@ handle_leader_call({reg_or_locate, {n,g,_} = K, Value, P},
 handle_leader_call({update_counter, {T,g,_Ctr} = Key, Incr, Pid}, _From, S, _E)
   when is_integer(Incr), T==c;
        is_integer(Incr), T==n ->
-    try New = ets:update_counter(?TAB, {Key, Pid}, {3,Incr}),
+    try New = shards:update_counter(?TAB, {Key, Pid}, {3,Incr}),
 	 RealPid = case Pid of
-		       n -> ets:lookup_element(?TAB, {Key,Pid}, 2);
+		       n -> shards:lookup_element(?TAB, {Key,Pid}, 2);
 		       shared -> shared;
 		       P when is_pid(P) -> P
 		   end,
@@ -495,14 +495,14 @@ handle_leader_call({update_counters, Cs}, _From, S, _E) ->
 	    {reply, badarg, S}
     end;
 handle_leader_call({reset_counter, {c,g,_Ctr} = Key, Pid}, _From, S, _E) ->
-    try  Current = ets:lookup_element(?TAB, {Key, Pid}, 3),
-	 Initial = case ets:lookup_element(?TAB, {Pid, Key}, 2) of
+    try  Current = shards:lookup_element(?TAB, {Key, Pid}, 3),
+	 Initial = case shards:lookup_element(?TAB, {Pid, Key}, 2) of
 		       r -> 0;
 		       Opts when is_list(Opts) ->
 			   proplists:get_value(initial, Opts, 0)
 		   end,
 	 Incr = Initial - Current,
-	 New = ets:update_counter(?TAB, {Key, Pid}, {3, Incr}),
+	 New = shards:update_counter(?TAB, {Key, Pid}, {3, Incr}),
 	 Vals = [{{Key,Pid},Pid,New} | update_aggr_counter(Key, Incr)],
 	 {reply, {Current, New}, [{insert, Vals}], S}
     catch
@@ -516,11 +516,11 @@ handle_leader_call({Unreg, {T,g,Name} = K, Pid}, _From, S, _E)
     Key = if T == n; T == a; T == rc -> {K,T};
              true -> {K, Pid}
           end,
-    case ets:member(?TAB, Key) of
+    case shards:member(?TAB, Key) of
         true ->
             _ = gproc_lib:remove_reg(K, Pid, unreg),
             if T == c ->
-                    case ets:lookup(?TAB, {{a,g,Name},a}) of
+                    case shards:lookup(?TAB, {{a,g,Name},a}) of
                         [Aggr] ->
                             %% updated by remove_reg/3
                             {reply, true, [{delete,[{K,Pid}, {Pid,K}]},
@@ -529,7 +529,7 @@ handle_leader_call({Unreg, {T,g,Name} = K, Pid}, _From, S, _E)
                             {reply, true, [{delete, [{K,Pid}, {Pid,K}]}], S}
                     end;
                T == r ->
-                    case ets:lookup(?TAB, {{rc,g,Name},rc}) of
+                    case shards:lookup(?TAB, {{rc,g,Name},rc}) of
                         [RC] ->
                             {reply, true, [{delete,[{K,Pid}, {Pid,K}]},
                                            {insert, [RC]}], S};
@@ -546,26 +546,26 @@ handle_leader_call({Unreg, {T,g,Name} = K, Pid}, _From, S, _E)
 handle_leader_call({give_away, {T,g,_} = K, To, Pid}, _From, S, _E)
   when T == a; T == n; T == rc ->
     Key = {K, T},
-    case ets:lookup(?TAB, Key) of
+    case shards:lookup(?TAB, Key) of
         [{_, Pid, Value}] ->
             Opts = get_opts(Pid, K),
             case pid_to_give_away_to(To) of
                 Pid ->
                     {reply, Pid, S};
                 ToPid when is_pid(ToPid) ->
-                    ets:insert(?TAB, [{Key, ToPid, Value},
+                    shards:insert(?TAB, [{Key, ToPid, Value},
                                       {{ToPid,K}, Opts}]),
                     _ = gproc_lib:ensure_monitor(ToPid, g),
                     Rev = {Pid, K},
-                    ets:delete(?TAB, Rev),
+                    shards:delete(?TAB, Rev),
                     gproc_lib:notify({migrated, ToPid}, K, Opts),
                     {reply, ToPid, [{insert, [{Key, ToPid, Value}]},
                                     {notify, [{K, Pid, {migrated, ToPid}}]},
 				    {delete, [{K, Pid}, Rev]}], S};
                 undefined ->
-                    ets:delete(?TAB, Key),
+                    shards:delete(?TAB, Key),
                     Rev = {Pid, K},
-                    ets:delete(?TAB, Rev),
+                    shards:delete(?TAB, Rev),
                     gproc_lib:notify(unreg, K, Opts),
                     {reply, undefined, [{notify, [{K, Pid, unreg}]},
                                         {delete, [{K, Pid}, Rev]}], S}
@@ -603,7 +603,7 @@ handle_leader_call({set,{T,g,N} =K,V,Pid}, _From, S, _E) ->
        T == c ->
             try gproc_lib:do_set_counter_value(K, V, Pid),
                 AKey = {{a,g,N},a},
-                Aggr = ets:lookup(?TAB, AKey),  % may be []
+                Aggr = shards:lookup(?TAB, AKey),  % may be []
                 {reply, true, [{insert, [{{K,Pid},Pid,V} | Aggr]}], S}
             catch
                 error:_ ->
@@ -662,7 +662,7 @@ handle_leader_cast({remove_globals, Globals}, S, _E) ->
     delete_globals(Globals),
     {ok, S};
 handle_leader_cast({cancel_wait, Pid, {T,_,_} = Key, Ref}, S, _E) ->
-    case ets:lookup(?TAB, {Key, T}) of
+    case shards:lookup(?TAB, {Key, T}) of
 	[{_, Waiters}] ->
 	    Ops = gproc_lib:remove_wait(Key, Pid, Ref, Waiters),
 	    {ok, Ops, S};
@@ -670,7 +670,7 @@ handle_leader_cast({cancel_wait, Pid, {T,_,_} = Key, Ref}, S, _E) ->
 	    {ok, [], S}
     end;
 handle_leader_cast({cancel_wait_or_monitor, Pid, {T,_,_} = Key}, S, _E) ->
-    case ets:lookup(?TAB, {Key, T}) of
+    case shards:lookup(?TAB, {Key, T}) of
 	[{_, Waiters}] ->
 	    Ops = gproc_lib:remove_wait(Key, Pid, all, Waiters),
 	    {ok, Ops, S};
@@ -679,9 +679,9 @@ handle_leader_cast({cancel_wait_or_monitor, Pid, {T,_,_} = Key}, S, _E) ->
 	    {ok, Ops, S}
     end;
 handle_leader_cast({pid_is_DOWN, Pid}, S, _E) ->
-    Globals = ets:select(?TAB, [{{{Pid,'$1'}, '_'},
+    Globals = shards:select(?TAB, [{{{Pid,'$1'}, '_'},
                                  [{'==',{element,2,'$1'},g}],[{{'$1',Pid}}]}]),
-    ets:delete(?TAB, {Pid,g}),
+    shards:delete(?TAB, {Pid,g}),
     case process_globals(Globals) of
         [] ->
             {ok, S};
@@ -693,17 +693,17 @@ mk_broadcast_insert_vals(Objs) ->
     lists:flatmap(
       fun({{C, g, Name} = K, Pid, Value}) ->
 	      if C == a; C == rc ->
-		      ets:lookup(?TAB, {K,C}) ++ ets:lookup(?TAB, {Pid,K});
+		      shards:lookup(?TAB, {K,C}) ++ shards:lookup(?TAB, {Pid,K});
 		 C == c ->
-		      [{{K,Pid},Pid,Value} | ets:lookup(?TAB,{{a,g,Name},a})]
-			  ++ ets:lookup(?TAB, {Pid,K});
+		      [{{K,Pid},Pid,Value} | shards:lookup(?TAB,{{a,g,Name},a})]
+			  ++ shards:lookup(?TAB, {Pid,K});
                  C == r ->
-                      [{{K,Pid},Pid,Value} | ets:lookup(?TAB,{{rc,g,Name},rc})]
-                          ++ ets:lookup(?TAB, {Pid, K});
+                      [{{K,Pid},Pid,Value} | shards:lookup(?TAB,{{rc,g,Name},rc})]
+                          ++ shards:lookup(?TAB, {Pid, K});
 		 C == n ->
-		      [{{K,n},Pid,Value}| ets:lookup(?TAB, {Pid,K})];
+		      [{{K,n},Pid,Value}| shards:lookup(?TAB, {Pid,K})];
 		 true ->
-		      [{{K,Pid},Pid,Value} | ets:lookup(?TAB, {Pid,K})]
+		      [{{K,Pid},Pid,Value} | shards:lookup(?TAB, {Pid,K})]
 	      end
       end, Objs).
 
@@ -712,7 +712,7 @@ process_globals(Globals) ->
     {Modified, Notifications} =
         lists:foldl(
           fun({{T,_,_} = Key, Pid}, A) when T==n; T==a; T==rc ->
-                  case ets:lookup(?TAB, {Pid,Key}) of
+                  case shards:lookup(?TAB, {Pid,Key}) of
                       [{_, Opts}] when is_list(Opts) ->
                           maybe_failover(Key, Pid, Opts, A);
                       _ ->
@@ -721,7 +721,7 @@ process_globals(Globals) ->
              ({{T,_,_} = Key, Pid}, {MA,NA}) ->
                   MA1 = case T of
                             c ->
-                                Incr = ets:lookup_element(?TAB, {Key,Pid}, 3),
+                                Incr = shards:lookup_element(?TAB, {Key,Pid}, 3),
                                 update_aggr_counter(Key, -Incr) ++ MA;
                             r ->
                                 decrement_resource_count(Key, []) ++ MA;
@@ -742,7 +742,7 @@ maybe_failover({T,_,_} = Key, Pid, Opts, {MAcc, NAcc}) ->
             Notify = remove_entry(Key, Pid, unreg),
             {MAcc, Notify ++ NAcc};
         [{ToPid,Ref,_}|_] ->
-            Value = case ets:lookup(?TAB, {Key,T}) of
+            Value = case shards:lookup(?TAB, {Key,T}) of
                         [{_, _, V}] -> V;
                         _ -> undefined
                     end,
@@ -751,7 +751,7 @@ maybe_failover({T,_,_} = Key, Pid, Opts, {MAcc, NAcc}) ->
             _ = gproc_lib:ensure_monitor(ToPid, g),
             NewReg = {{Key,T}, ToPid, Value},
             NewRev = {{ToPid, Key}, Opts1},
-            ets:insert(?TAB, [NewReg, NewRev]),
+            shards:insert(?TAB, [NewReg, NewRev]),
             {[NewReg, NewRev | MAcc], Notify ++ NAcc}
     end.
 
@@ -771,12 +771,12 @@ filter_standbys([], _) ->
 
 remove_entry(Key, Pid, Event) ->
     K = ets_key(Key, Pid),
-    case ets:lookup(?TAB, K) of
+    case shards:lookup(?TAB, K) of
 	[{_, P, _}] when is_pid(P), P =:= Pid; is_atom(Pid) ->
-	    ets:delete(?TAB, K),
+	    shards:delete(?TAB, K),
 	    remove_rev_entry(get_opts(Pid, Key), Pid, Key, Event);
 	[{_, _OtherPid, _}] ->
-	    ets:delete(?TAB, {Pid, Key}),
+	    shards:delete(?TAB, {Pid, Key}),
 	    [];
         [{_, _Waiters}] ->
             %% Skip
@@ -787,14 +787,14 @@ remove_entry(Key, Pid, Event) ->
 remove_rev_entry(Opts, Pid, {T,g,_} = K, Event) when T==n; T==a ->
     Key = {Pid, K},
     gproc_lib:notify(Event, K, Opts),
-    ets:delete(?TAB, Key),
+    shards:delete(?TAB, Key),
     [{K, Pid, Event}];
 remove_rev_entry(_, Pid, K, _Event) ->
-    ets:delete(?TAB, {Pid, K}),
+    shards:delete(?TAB, {Pid, K}),
     [].
 
 get_opts(Pid, K) ->
-    case ets:lookup(?TAB, {Pid, K}) of
+    case shards:lookup(?TAB, {Pid, K}) of
         [] -> [];
         [{_, r}] -> [];
         [{_, Opts}] -> Opts
@@ -823,12 +823,12 @@ from_leader(Ops, S, _E) ->
 insert_globals(Globals) ->
     lists:foldl(
       fun({{{_,_,_} = Key,_}, Pid, _} = Obj, A) ->
-              ets:insert(?TAB, Obj),
-	      ets:insert_new(?TAB, {{Pid,Key}, []}),
+              shards:insert(?TAB, Obj),
+	      shards:insert_new(?TAB, {{Pid,Key}, []}),
 	      gproc_lib:ensure_monitor(Pid,g),
 	      A;
 	 ({{P,_K}, Opts} = Obj, A) when is_pid(P), is_list(Opts),Opts =/= [] ->
-	      ets:insert(?TAB, Obj),
+	      shards:insert(?TAB, Obj),
 	      gproc_lib:ensure_monitor(P,g),
 	      [Obj] ++ A;
 	 (_Other, A) ->
@@ -844,14 +844,14 @@ delete_globals(Globals) ->
                                           is_pid(P), is_pid(T) ->
 	      remove_entry(K, P, []);
          ({Pid, Key}) when is_pid(Pid); Pid==shared ->
-	      ets:delete(?TAB, {Pid, Key})
+	      shards:delete(?TAB, {Pid, Key})
       end, Globals).
 
 do_notify([{P, Msg}|T]) when is_pid(P) ->
     P ! Msg,
     do_notify(T);
 do_notify([{K, P, E}|T]) ->
-    case ets:lookup(?TAB, {P,K}) of
+    case shards:lookup(?TAB, {P,K}) of
         [{_, Opts}] when is_list(Opts) ->
             gproc_lib:notify(E, K, Opts);
         _ ->
@@ -883,13 +883,13 @@ init(Opts) ->
 
 surrendered_1(Globs) ->
     My_local_globs =
-        ets:select(?TAB, [{{{{'_',g,'_'},'_'},'$1', '$2'},
+        shards:select(?TAB, [{{{{'_',g,'_'},'_'},'$1', '$2'},
                            [{'==', {node,'$1'}, node()}],
                            [{{ {element,1,'$_'}, '$1', '$2' }}]}]),
     _ = [gproc_lib:ensure_monitor(Pid, g) || {_, Pid, _} <- My_local_globs],
     ?event({'My_local_globs', My_local_globs}),
     %% remove all remote globals.
-    ets:select_delete(?TAB, [{{{{'_',g,'_'},'_'}, '$1', '_'},
+    shards:select_delete(?TAB, [{{{{'_',g,'_'},'_'}, '$1', '_'},
                               [{'=/=', {node,'$1'}, node()}],
                               [true]},
 			     {{{'$1',{'_',g,'_'}}, '_'},
@@ -900,12 +900,12 @@ surrendered_1(Globs) ->
     Ldr_local_globs =
         lists:foldl(
           fun({{Key,_}=K, Pid, V}, Acc) when node(Pid) =/= node() ->
-                  ets:insert(?TAB, {K, Pid, V}),
+                  shards:insert(?TAB, {K, Pid, V}),
 		  _ = gproc_lib:ensure_monitor(Pid, g),
-		  ets:insert_new(?TAB, {{Pid,Key}, []}),
+		  shards:insert_new(?TAB, {{Pid,Key}, []}),
                   Acc;
 	     ({{_Pid,_}=K, Opts}, Acc) -> % when node(Pid) =/= node() ->
-		     ets:insert(?TAB, {K, Opts}),
+		     shards:insert(?TAB, {K, Opts}),
 		     Acc;
              ({_, Pid, _} = Obj, Acc) when node(Pid) == node() ->
                   [Obj|Acc]
@@ -957,15 +957,15 @@ add_object(Obj, []) ->
 
 
 update_counter_g({c,g,_} = Key, Incr, Pid) when is_integer(Incr) ->
-    Res = ets:update_counter(?TAB, {Key, Pid}, {3,Incr}),
+    Res = shards:update_counter(?TAB, {Key, Pid}, {3,Incr}),
     update_aggr_counter(Key, Incr, [{{Key,Pid},Pid,Res}]);
 update_counter_g({c,g,_} = Key, {Incr, Threshold, SetValue}, Pid)
   when is_integer(Incr), is_integer(Threshold), is_integer(SetValue) ->
-    [Prev, New] = ets:update_counter(?TAB, {Key, Pid},
+    [Prev, New] = shards:update_counter(?TAB, {Key, Pid},
 				     [{3, 0}, {3, Incr, Threshold, SetValue}]),
     update_aggr_counter(Key, New - Prev, [{{Key,Pid},Pid,New}]);
 update_counter_g({c,g,_} = Key, Ops, Pid) when is_list(Ops) ->
-    case ets:update_counter(?TAB, {Key, Pid},
+    case shards:update_counter(?TAB, {Key, Pid},
 			    [{3, 0} | expand_ops(Ops)]) of
 	[_] ->
 	    [];
@@ -994,30 +994,30 @@ update_aggr_counter(Key, Incr) ->
 
 update_aggr_counter({c,g,Ctr}, Incr, Acc) ->
     Key = {{a,g,Ctr},a},
-    case ets:lookup(?TAB, Key) of
+    case shards:lookup(?TAB, Key) of
         [] ->
             Acc;
         [{K, Pid, Prev}] ->
             New = {K, Pid, Prev+Incr},
-            ets:insert(?TAB, New),
+            shards:insert(?TAB, New),
             [New|Acc]
     end.
 
 decrement_resource_count({r,g,Rsrc}, Acc) ->
     Key = {{rc,g,Rsrc},rc},
-    case ets:member(?TAB, Key) of
+    case shards:member(?TAB, Key) of
         false ->
             Acc;
         true ->
             %% Call the lib function, which might trigger events
             gproc_lib:decrement_resource_count(g, Rsrc),
-            ets:lookup(?TAB, Key) ++ Acc
+            shards:lookup(?TAB, Key) ++ Acc
     end.
 
 pid_to_give_away_to(P) when is_pid(P) ->
     P;
 pid_to_give_away_to({T,g,_} = Key) when T==n; T==a ->
-    case ets:lookup(?TAB, {Key, T}) of
+    case shards:lookup(?TAB, {Key, T}) of
         [{_, Pid, _}] ->
             Pid;
         _ ->
@@ -1048,7 +1048,7 @@ tell_waiters([], _, _, _, _) ->
 add_follow_to_waiters(Waiters, {T,_,_} = K, Pid, Ref, S) ->
     Obj = {{K,T}, [{Pid, Ref, follow}|Waiters]},
     Rev = {{Pid,K}, []},
-    ets:insert(?TAB, [Obj, Rev]),
+    shards:insert(?TAB, [Obj, Rev]),
     Msg = {gproc, unreg, Ref, K},
     if node(Pid) == node() ->
             Pid ! Msg,
