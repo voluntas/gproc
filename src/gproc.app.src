@@ -8,7 +8,7 @@
   {vsn, git},
   {id, "GPROC"},
   {registered, [ ] },
-  {applications, [ kernel, stdlib ] },
+  {applications, [ kernel, stdlib, shards ] },
   {mod, {gproc_app, []} }
  ]
 }.

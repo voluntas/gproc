@@ -84,6 +84,8 @@ unsubscribe({T,S,_} = Key) when (T==n orelse T==a)
     end,
     gen_server:cast(?SERVER, {unsubscribe, self(), Key}).
 
+-include_lib("eunit/include/eunit.hrl").
+
 %%--------------------------------------------------------------------
 %% @doc
 %% Starts the server
@@ -92,16 +94,24 @@ unsubscribe({T,S,_} = Key) when (T==n orelse T==a)
 %% @end
 %%--------------------------------------------------------------------
 start_link() ->
+    ?debugHere,
     Me = self(),
+    ?debugHere,
     _ = case shards:info(?TAB, owner) of
 	    undefined ->
-		shards:new(?TAB, [ordered_set, protected, named_table,
-			       {heir, self(), []}]);
+                ?debugHere,
+		shards:new(?TAB, [ordered_set, protected, named_table]),
+                ?debugHere,
+                shards:setopts(?TAB, [{heir, self(), []}]);
 	    Me ->
+                ?debugHere,
 		ok
 	end,
+    ?debugHere,
     {ok, Pid} = proc_lib:start_link(?MODULE, init, [Me]),
+    ?debugHere,
     shards:give_away(?TAB, Pid, []),
+    ?debugHere,
     {ok, Pid}.
 
 %%%===================================================================
@@ -120,10 +130,15 @@ start_link() ->
 %% @end
 %%--------------------------------------------------------------------
 init(Parent) ->
+    ?debugHere,
     process_flag(priority, high),
+    ?debugHere,
     register(?SERVER, self()),
+    ?debugHere,
     proc_lib:init_ack(Parent, {ok, self()}),
+    ?debugHere,
     receive {'ETS-TRANSFER',?TAB,_,_} -> ok end,
+    ?debugHere,
     gen_server:enter_loop(?MODULE, [], #state{}).
 
 %%--------------------------------------------------------------------

@@ -2656,11 +2656,9 @@ pid_to_give_away_to({T,l,_} = Key) when T==n; T==a; T==rc ->
     end.
 
 create_tabs() ->
-    Opts = gproc_lib:valid_opts(ets_options, [{write_concurrency,true},
-					      {read_concurrency, true}]),
     case shards:info(?TAB, name) of
         undefined ->
-            shards:new(?TAB, [ordered_set, public, named_table | Opts]);
+            shards:new(?TAB, [ordered_set, public, named_table]);
         _ ->
             ok
     end.
