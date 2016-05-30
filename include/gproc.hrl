@@ -17,4 +17,4 @@
 %%
 %% gproc.hrl: Common definitions
 
--define(TAB, gproc).
+-define(TAB, gproc_tab).

@@ -35,7 +35,7 @@
 	 terminate/2, code_change/3]).
 
 -define(SERVER, ?MODULE).
--define(TAB, ?MODULE).
+-define(TAB, gproc_monitor_tab).
 
 -record(state, {}).
 
@@ -95,8 +95,8 @@ start_link() ->
     Me = self(),
     _ = case shards:info(?TAB, owner) of
 	    undefined ->
-		shards:new(?TAB, [ordered_set, protected, named_table,
-			       {heir, self(), []}]);
+		shards:new(?TAB, [ordered_set, protected, named_table]),
+                shards:setopts(?TAB, [{heir, self(), []}]);
 	    Me ->
 		ok
 	end,
